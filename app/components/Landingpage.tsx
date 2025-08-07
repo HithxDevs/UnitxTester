@@ -5,7 +5,7 @@ import RepoExplorerSection from './RepositoryExplorer';
 import { SessionProvider } from "next-auth/react";
 import { useState, useEffect } from 'react';
 
-//@ts-ignore
+//@ts-expect-error
 export const LandingPage = ({ session }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
