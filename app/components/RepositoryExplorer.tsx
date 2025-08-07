@@ -63,8 +63,6 @@ const RepoExplorerSection = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathHistory, setPathHistory] = useState<string[]>(['']);
-  
-  // Test generation states
   const [selectedCode, setSelectedCode] = useState<string>('');
   const [selectedFiles, setSelectedFiles] = useState<GitHubFileContent[]>([]);
   const [testCaseSummaries, setTestCaseSummaries] = useState<TestCaseSummary[]>([]);
@@ -73,14 +71,11 @@ const RepoExplorerSection = () => {
   const [isGeneratingSummaries, setIsGeneratingSummaries] = useState(false);
   const [testFramework, setTestFramework] = useState<string>('jest');
   const [testType, setTestType] = useState<string>('unit');
-  
-  // UI states
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showTestSection, setShowTestSection] = useState(false);
   const [showSummarySection, setShowSummarySection] = useState(false);
   const [prUrl, setPrUrl] = useState<string | null>(null);
 
-  // Fetch user repos when session changes
   useEffect(() => {
     if (session?.accessToken) {
       fetchUserRepos();
@@ -280,7 +275,26 @@ const RepoExplorerSection = () => {
       `;
 
       const result = await callOpenAI(prompt);
-      const summaries = JSON.parse(result);
+
+      let summaries;
+      try {
+        summaries = JSON.parse(result);
+      } catch (parseError) {
+        console.error('JSON Parse Error:', parseError);
+        console.log('Raw result:', result);
+        
+        const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          try {
+            summaries = JSON.parse(jsonMatch[1]);
+          } catch (secondParseError) {
+            throw new Error('Could not parse response as JSON: ' + result);
+          }
+        } else {
+          throw new Error('Response is not valid JSON: ' + result);
+        }
+      }
+
       setTestCaseSummaries(summaries);
       setShowSummarySection(true);
     } catch (err) {
@@ -590,9 +604,9 @@ const RepoExplorerSection = () => {
         )}
       </div>
 
-      <div className={`flex flex-col ${isFullScreen ? 'h-screen' : 'h-[700px]'}`}>
+      <div className={`flex flex-col ${isFullScreen ? 'h-[calc(100vh-110px)]' : 'h-[700px]'}`}>
         {/* Main Explorer Section */}
-        <div className="flex flex-col lg:flex-row flex-1">
+        <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
           {/* Repo List */}
           <div className="w-full lg:w-1/5 border-r overflow-y-auto bg-gray-50">
             <div className="p-4 bg-gray-100 border-b sticky top-0">
@@ -676,7 +690,7 @@ const RepoExplorerSection = () => {
           )}
 
           {/* Code Viewer */}
-          <div className="flex-1 overflow-y-auto bg-gray-900">
+          <div className="flex-1 overflow-hidden flex flex-col">
             {fileContent ? (
               <div className="h-full flex flex-col">
                 <div className="px-4 py-3 bg-gray-800 text-gray-300 border-b border-gray-700 flex justify-between items-center flex-wrap gap-2">
@@ -761,7 +775,7 @@ const RepoExplorerSection = () => {
 
         {/* Test Case Summary Section */}
         {showSummarySection && (
-          <div className="border-t bg-white">
+          <div className="border-t bg-white flex-shrink-0">
             <div className="p-4 bg-blue-50 border-b flex justify-between items-center">
               <div>
                 <h3 className="font-medium text-gray-800">Suggested Test Cases</h3>
@@ -785,14 +799,14 @@ const RepoExplorerSection = () => {
               </div>
             </div>
             
-            <div className="max-h-64 overflow-y-auto p-4">
+            <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
               {isGeneratingSummaries ? (
                 <div className="text-center py-8">
                   <div className="animate-spin inline-block w-8 h-8 border-4 border-gray-200 border-t-blue-600 rounded-full mb-4"></div>
                   <p className="text-gray-600">Analyzing code and generating test suggestions...</p>
                 </div>
               ) : testCaseSummaries.length > 0 ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
                   {testCaseSummaries.map((summary, index) => (
                     <div key={index} className="bg-white rounded-lg p-4 border shadow-sm">
                       <div className="flex justify-between items-start mb-3">
@@ -835,7 +849,7 @@ const RepoExplorerSection = () => {
 
         {/* Generated Test Cases Section */}
         {showTestSection && (
-          <div className="border-t bg-white">
+          <div className="border-t bg-white flex-shrink-0">
             <div className="p-4 bg-green-50 border-b flex justify-between items-center">
               <div>
                 <h3 className="font-medium text-gray-800">Generated Test Cases</h3>
@@ -859,14 +873,14 @@ const RepoExplorerSection = () => {
               </div>
             </div>
             
-            <div className="max-h-64 overflow-y-auto p-4">
+            <div className="overflow-y-auto" style={{ maxHeight: '200px' }}>
               {isGeneratingTests ? (
                 <div className="text-center py-8">
                   <div className="animate-spin inline-block w-8 h-8 border-4 border-gray-200 border-t-green-600 rounded-full mb-4"></div>
                   <p className="text-gray-600">Generating test code...</p>
                 </div>
               ) : generatedTests.length > 0 ? (
-                <div className="space-y-4">
+                <div className="space-y-4 p-4">
                   {generatedTests.map((test) => (
                     <div key={test.id} className="bg-white rounded-lg p-4 border shadow-sm">
                       <div className="flex justify-between items-start mb-3">
