@@ -345,95 +345,215 @@ const RepoExplorerSection = () => {
     }
   };
 
-  const createPullRequest = async (test: TestCase) => {
-    if (!session?.accessToken || !selectedRepo) {
-      setError('Not authenticated or no repo selected');
-      return;
+const createPullRequest = async (test: TestCase) => {
+  if (!session?.accessToken || !selectedRepo) {
+    setError('Not authenticated or no repo selected');
+    return;
+  }
+
+  setLoading(true);
+  setError(null);
+  
+  try {
+    const selectedRepoObj = repos.find(r => r.name === selectedRepo);
+    const owner = selectedRepoObj?.owner?.login || session.user?.name;
+    
+    console.log('Creating PR for repo:', `${owner}/${selectedRepo}`);
+    
+    // Step 1: Get the default branch (might be 'main' or 'master')
+    const repoResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${selectedRepo}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+    
+    if (!repoResponse.ok) {
+      const errorData = await repoResponse.json();
+      throw new Error(`Failed to get repo info: ${errorData.message}`);
+    }
+    
+    const repoData = await repoResponse.json();
+    const defaultBranch = repoData.default_branch; // This will be 'main', 'master', etc.
+    
+    console.log('Default branch:', defaultBranch);
+    
+    // Step 2: Get the latest commit SHA from the default branch
+    const branchRefResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${selectedRepo}/git/refs/heads/${defaultBranch}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      }
+    );
+    
+    if (!branchRefResponse.ok) {
+      const errorData = await branchRefResponse.json();
+      throw new Error(`Failed to get branch reference: ${errorData.message}`);
+    }
+    
+    const branchRefData = await branchRefResponse.json();
+    const baseSha = branchRefData.object.sha;
+    
+    console.log('Base SHA:', baseSha);
+    
+    // Step 3: Create a new branch with a unique name
+    const timestamp = Date.now();
+    const branchName = `add-test-${timestamp}`;
+    
+    const createBranchResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${selectedRepo}/git/refs`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ref: `refs/heads/${branchName}`,
+          sha: baseSha,
+        }),
+      }
+    );
+    
+    if (!createBranchResponse.ok) {
+      const errorData = await createBranchResponse.json();
+      throw new Error(`Failed to create branch: ${errorData.message}`);
+    }
+    
+    console.log('Branch created:', branchName);
+    
+    // Step 4: Determine the test file path
+    let testFilePath;
+    if (test.filePath) {
+      // Create test file next to the original file or in a tests directory
+      const pathParts = test.filePath.split('/');
+      const fileName = pathParts[pathParts.length - 1];
+      const fileNameWithoutExt = fileName.split('.').slice(0, -1).join('.');
+      const fileExt = fileName.split('.').pop();
+      
+      // Try to determine appropriate test file extension and path
+      let testFileName;
+      let testDir = 'tests';
+      
+      switch (fileExt) {
+        case 'js':
+        case 'jsx':
+          testFileName = `${fileNameWithoutExt}.test.js`;
+          break;
+        case 'ts':
+        case 'tsx':
+          testFileName = `${fileNameWithoutExt}.test.ts`;
+          break;
+        case 'py':
+          testFileName = `test_${fileNameWithoutExt}.py`;
+          break;
+        case 'java':
+          testFileName = `${fileNameWithoutExt}Test.java`;
+          testDir = 'src/test/java';
+          break;
+        default:
+          testFileName = `${fileNameWithoutExt}.test.${fileExt}`;
+      }
+      
+      testFilePath = `${testDir}/${testFileName}`;
+    } else {
+      testFilePath = `tests/test-${timestamp}.spec.js`;
+    }
+    
+    console.log('Test file path:', testFilePath);
+    
+    // Step 5: Check if the tests directory exists, if not we'll create the file anyway
+    // (GitHub will create directories automatically when creating files)
+    
+    // Step 6: Create the test file
+    const createFileResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${selectedRepo}/contents/${testFilePath}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: `Add test: ${test.description}`,
+          content: btoa(unescape(encodeURIComponent(test.code))), // Proper UTF-8 encoding
+          branch: branchName,
+        }),
+      }
+    );
+    
+    if (!createFileResponse.ok) {
+      const errorData = await createFileResponse.json();
+      throw new Error(`Failed to create test file: ${errorData.message}`);
+    }
+    
+    console.log('Test file created');
+    
+    // Step 7: Create the pull request
+    const prBody = `
+## Automated Test Case
+
+**Description:** ${test.description}
+
+**Test Type:** ${test.type}
+**Framework:** ${test.framework}
+${test.filePath ? `**Original File:** ${test.filePath}` : ''}
+
+---
+
+This test case was automatically generated. Please review the test logic and modify as needed before merging.
+
+### Generated Test File
+\`${testFilePath}\`
+    `.trim();
+    
+    const createPrResponse = await fetch(
+      `https://api.github.com/repos/${owner}/${selectedRepo}/pulls`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: `🧪 Add ${test.type} test: ${test.description}`,
+          head: branchName,
+          base: defaultBranch, // Use the actual default branch
+          body: prBody,
+        }),
+      }
+    );
+
+    if (!createPrResponse.ok) {
+      const errorData = await createPrResponse.json();
+      console.error('PR creation error:', errorData);
+      throw new Error(`Failed to create PR: ${errorData.message || errorData.errors?.[0]?.message || 'Unknown error'}`);
     }
 
-    setLoading(true);
+    const prData = await createPrResponse.json();
+    console.log('Pull request created successfully:', prData.html_url);
+
+    setPrUrl(prData.html_url);
+    
+    // Show success message
     setError(null);
     
-    try {
-      const selectedRepoObj = repos.find(r => r.name === selectedRepo);
-      const owner = selectedRepoObj?.owner?.login || session.user?.name;
-      
-      // Create a new branch
-      const branchName = `add-test-${Date.now()}`;
-      const baseBranchResponse = await fetch(
-        `https://api.github.com/repos/${owner}/${selectedRepo}/git/refs/heads/main`,
-        {
-          headers: {
-            'Authorization': `Bearer ${session.accessToken}`,
-            'Accept': 'application/vnd.github.v3+json',
-          },
-        }
-      );
-      
-      const baseBranchData = await baseBranchResponse.json();
-      const baseSha = baseBranchData.object.sha;
-      
-      await fetch(
-        `https://api.github.com/repos/${owner}/${selectedRepo}/git/refs`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.accessToken}`,
-            'Accept': 'application/vnd.github.v3+json',
-          },
-          body: JSON.stringify({
-            ref: `refs/heads/${branchName}`,
-            sha: baseSha,
-          }),
-        }
-      );
-      
-      // Create test file
-      const testFilePath = `tests/${test.filePath?.replace(/\.([^\.]+)$/, '.test.$1') || `test-${Date.now()}.spec.js`}`;
-      
-      await fetch(
-        `https://api.github.com/repos/${owner}/${selectedRepo}/contents/${testFilePath}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${session.accessToken}`,
-            'Accept': 'application/vnd.github.v3+json',
-          },
-          body: JSON.stringify({
-            message: `Add test: ${test.description}`,
-            content: btoa(test.code),
-            branch: branchName,
-          }),
-        }
-      );
-      
-      // Create PR
-      const prResponse = await fetch(
-        `https://api.github.com/repos/${owner}/${selectedRepo}/pulls`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.accessToken}`,
-            'Accept': 'application/vnd.github.v3+json',
-          },
-          body: JSON.stringify({
-            title: `Test: ${test.description}`,
-            head: branchName,
-            base: 'main',
-            body: `Automatically generated test case for ${test.filePath}`,
-          }),
-        }
-      );
-      
-      const prData = await prResponse.json();
-      setPrUrl(prData.html_url);
-    } catch (err) {
-      console.error('Error creating PR:', err);
-      setError('Failed to create pull request');
-    } finally {
-      setLoading(false);
-    }
-  };
+  } catch (err) {
+    console.error('Error creating PR:', err);
+    setError(`Failed to create pull request: ${err instanceof Error ? err.message : 'Unknown error'}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleCodeSelection = () => {
     if (typeof window !== 'undefined') {
