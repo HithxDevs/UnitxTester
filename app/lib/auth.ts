@@ -3,6 +3,10 @@ import GithubProvider from "next-auth/providers/github";
 
 const authOptions = {
   secret: process.env.NEXTAUTH_SECRET,
+  pages: {
+    signIn: '/',
+    error: '/',
+  },
   providers: [
     GithubProvider({
       clientId: process.env.GITHUB_ID || "",
@@ -31,6 +35,11 @@ const authOptions = {
       return session;
     },
   },
+  debug: process.env.NODE_ENV === 'development',
+  // Use default URL if NEXTAUTH_URL is not set (for development)
+  ...(process.env.NEXTAUTH_URL ? {} : { 
+    trustHost: true 
+  }),
 };
 
 export default NextAuth(authOptions);

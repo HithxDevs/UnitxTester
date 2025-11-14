@@ -19,7 +19,7 @@ export const LandingPage = ({ session }) => {
   }, []);
 
   return (
-    <SessionProvider session={session}>
+    <SessionProvider session={session} refetchInterval={0} refetchOnWindowFocus={false}>
       <div className="min-h-screen flex flex-col bg-gradient-to-b from-gray-50 to-white">
         {/* Header/Navigation */}
         <header className={`fixed w-full z-50 transition-all duration-300 ${scrolled ? 'bg-white shadow-sm py-2' : 'bg-transparent py-4'}`}>
@@ -127,37 +127,37 @@ export const LandingPage = ({ session }) => {
         </section>
 
         {/* Repository Explorer Section */}
-        <section id="explorer" className="py-16 bg-gray-50 w-full">
-  <div className="mx-4 sm:mx-6 lg:mx-8 xl:mx-auto xl:max-w-7xl">
-    <div className="text-center mb-12">
-      <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-        Explore Your Repository
-      </h2>
-      <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-        Connect your GitHub account to browse your repositories and generate test cases.
-      </p>
-    </div>
+        <section id="explorer" className="py-8 bg-gray-50 w-full min-h-screen">
+          <div className="mx-4 sm:mx-6 lg:mx-8 xl:mx-auto xl:max-w-[95%] 2xl:max-w-7xl">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+                Explore Your Repository
+              </h2>
+              <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+                Connect your GitHub account to browse your repositories and generate test cases.
+              </p>
+            </div>
 
-    <div className="w-full bg-white p-6 shadow-xl border-y border-gray-200">
-      <RepoExplorerSection />
-      
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center space-x-2 text-sm text-gray-500">
-          <FaCheck className="text-green-500" />
-          <span>Supports JavaScript, TypeScript, Python, and more</span>
-        </div>
-        <div className="flex items-center space-x-2 text-sm text-gray-500">
-          <FaCheck className="text-green-500" />
-          <span>Private repository support</span>
-        </div>
-        <div className="flex items-center space-x-2 text-sm text-gray-500">
-          <FaCheck className="text-green-500" />
-          <span>Collaborative testing</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+            <div className="w-full bg-white p-4 sm:p-6 shadow-xl rounded-lg border border-gray-200">
+              <RepoExplorerSection />
+              
+              <div className="mt-6 pt-6 border-t border-gray-200 flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <FaCheck className="text-green-500" />
+                  <span>Supports JavaScript, TypeScript, Python, and more</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <FaCheck className="text-green-500" />
+                  <span>Private repository support</span>
+                </div>
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <FaCheck className="text-green-500" />
+                  <span>Collaborative testing</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
         
         {/* How It Works Section */}
