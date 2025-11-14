@@ -7,11 +7,11 @@ const googleAI = process.env.GOOGLE_API_KEY
   : null;
 
 // Gemini model priority list (Flash models have higher free tier limits)
+// Note: Use standard model names without -latest suffix for v1beta API
 const GEMINI_MODELS = [
-  'gemini-1.5-flash',        // Best free tier limits
-  'gemini-1.5-flash-latest', // Latest flash version
+  'gemini-1.5-flash',        // Best free tier limits - most reliable
   'gemini-1.5-pro',          // Pro model fallback
-  'gemini-1.5-pro-latest'    // Latest pro version fallback
+  'gemini-1.0-pro'           // Legacy fallback (if still available)
 ];
 
 interface GenerateRequest {
