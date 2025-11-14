@@ -221,7 +221,7 @@ const RepoExplorerSection = () => {
     }
   };
 
-  const callOpenAI = async (prompt: string, maxTokens = 1000) => {
+  const callGemini = async (prompt: string, maxTokens = 1000) => {
     try {
       const response = await fetch('/api/openai', {
         method: 'POST',
@@ -247,7 +247,7 @@ const RepoExplorerSection = () => {
 
       return data.result;
     } catch (error) {
-      console.error('Error calling OpenAI:', error);
+      console.error('Error calling Gemini AI:', error);
       throw error;
     }
   };
@@ -283,7 +283,7 @@ const RepoExplorerSection = () => {
         }]
       `;
 
-      const result = await callOpenAI(prompt);
+      const result = await callGemini(prompt);
 
       let summaries;
       try {
@@ -336,7 +336,7 @@ const RepoExplorerSection = () => {
         Respond with just the complete test code in a code block.
       `;
 
-      const testCode = await callOpenAI(prompt, 2000);
+      const testCode = await callGemini(prompt, 2000);
       
       const newTest: TestCase = {
         ...summary,
