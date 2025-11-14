@@ -7,11 +7,14 @@ const googleAI = process.env.GOOGLE_API_KEY
   : null;
 
 // Gemini model priority list
-// Note: Model availability depends on API key and project configuration
-// Free tier typically supports: gemini-1.5-flash, gemini-1.5-pro
+// Updated: Google has deprecated gemini-1.5 models and now only supports Gemini 2.x models
+// Models must include the "models/" prefix for the API
 const GEMINI_MODELS = [
-  'gemini-1.5-flash',        // Most commonly available, best for free tier
-  'gemini-1.5-pro'           // Pro model fallback
+  'models/gemini-2.5-flash',        // Latest flash model - best for free tier
+  'models/gemini-2.5-pro',           // Latest pro model
+  'models/gemini-2.0-flash',         // 2.0 flash model
+  'models/gemini-2.0-flash-001',    // 2.0 flash variant
+  'models/gemini-2.0-flash-lite-001' // Lite variant
 ];
 
 interface GenerateRequest {
@@ -38,6 +41,69 @@ async function listAvailableModels(): Promise<string[]> {
     console.error('Error listing models:', error);
   }
   return [];
+}
+
+// Helper function to try REST API v1 directly
+async function tryRestAPIv1(
+  modelName: string,
+  prompt: string,
+  maxTokens: number,
+  temperature: number
+): Promise<{ success: boolean; result?: any; error?: any }> {
+  try {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
+      return { success: false, error: 'No API key' };
+    }
+
+    const cleanModelName = modelName.replace(/^models\//, '');
+    const restResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/${cleanModelName}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            maxOutputTokens: Math.min(maxTokens, 8192),
+            temperature: Math.max(0, Math.min(2, temperature))
+          }
+        })
+      }
+    );
+
+    if (restResponse.ok) {
+      const restData = await restResponse.json();
+      const text = restData.candidates?.[0]?.content?.parts?.[0]?.text;
+      
+      if (text) {
+        let cleanedResult = text;
+        cleanedResult = cleanedResult.replace(/```json\s*/, '').replace(/```\s*$/, '');
+        cleanedResult = cleanedResult.trim();
+        
+        return {
+          success: true,
+          result: {
+            text: cleanedResult,
+            usageMetadata: restData.usageMetadata
+          }
+        };
+      }
+    } else {
+      const errorData = await restResponse.json();
+      return { success: false, error: errorData };
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+  
+  return { success: false, error: 'Unknown error' };
 }
 
 export async function POST(request: Request) {
@@ -72,27 +138,47 @@ export async function POST(request: Request) {
       );
     }
 
-    // Use specified model or try models in priority order
-    const modelsToTry = model ? [model] : GEMINI_MODELS;
+    // Combine system prompt and user prompt
+    const fullPrompt = `${systemPrompt}\n\nUser: ${prompt}`;
+
+    // First, try to get available models and use them if possible
+    const availableModels = await listAvailableModels();
+    let modelsToTry: string[] = [];
+    
+    if (model) {
+      modelsToTry = [model];
+    } else if (availableModels.length > 0) {
+      // Filter to only Gemini models that support generateContent
+      const geminiModels = availableModels.filter((m: string) => 
+        m.includes('gemini') && !m.includes('embedding')
+      );
+      if (geminiModels.length > 0) {
+        modelsToTry = geminiModels.slice(0, 3); // Use first 3 available
+      } else {
+        modelsToTry = GEMINI_MODELS; // Fallback to hardcoded
+      }
+    } else {
+      modelsToTry = GEMINI_MODELS; // Fallback to hardcoded
+    }
+
     let lastError = null;
 
+    // Try SDK first for each model
     for (const modelName of modelsToTry) {
       try {
-        // Clean model name (remove models/ prefix if SDK adds it automatically)
-        const cleanModelName = modelName.replace(/^models\//, '');
-        
-        console.log(`Attempting to use model: ${cleanModelName}`);
+        // SDK may accept model names with or without "models/" prefix
+        // Try with prefix first (as required by newer API)
+        const modelNameForSDK = modelName.includes('/') ? modelName : `models/${modelName}`;
+        const cleanModelName = modelName.replace(/^models\//, ''); // For REST API URL
+        console.log(`Attempting SDK with model: ${modelNameForSDK}`);
         
         const genModel = googleAI.getGenerativeModel({ 
-          model: cleanModelName,
+          model: modelNameForSDK,
           generationConfig: {
             maxOutputTokens: Math.min(maxTokens, 8192),
             temperature: Math.max(0, Math.min(2, temperature))
           }
         });
-
-        // Combine system prompt and user prompt
-        const fullPrompt = `${systemPrompt}\n\nUser: ${prompt}`;
 
         const result = await genModel.generateContent(fullPrompt);
         const response = await result.response;
@@ -101,31 +187,25 @@ export async function POST(request: Request) {
           throw new Error('Empty response received');
         }
 
-        // Clean up the response text - remove markdown code blocks if present
         let cleanedResult = response.text();
-        
-        // Remove ```json and ``` markers if present
         cleanedResult = cleanedResult.replace(/```json\s*/, '').replace(/```\s*$/, '');
-        
-        // Remove any leading/trailing whitespace
         cleanedResult = cleanedResult.trim();
 
         return NextResponse.json({
           result: cleanedResult,
-          model_used: modelName,
+          model_used: cleanModelName,
+          method: 'SDK',
           tokens_used: response.usageMetadata?.totalTokenCount || 0,
           input_tokens: response.usageMetadata?.promptTokenCount || 0,
           output_tokens: response.usageMetadata?.candidatesTokenCount || 0
         });
 
       } catch (error: any) {
-        console.warn(`Model ${modelName} failed:`, error.message);
+        console.warn(`SDK model ${modelName} failed:`, error.message);
         lastError = error;
         
-        // Don't retry if it's a quota/rate limit error - wait and use next model
+        // Don't retry if it's a quota/rate limit error
         if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('Too Many Requests')) {
-          console.warn(`Quota exceeded for ${modelName}, trying next model...`);
-          lastError = error;
           continue;
         }
         
@@ -139,77 +219,47 @@ export async function POST(request: Request) {
             { status: 400 }
           );
         }
-        
-        continue;
       }
     }
 
-    // If SDK failed, try direct REST API call to v1 (free tier keys often work better with v1)
-    console.log('SDK methods failed, trying direct REST API v1...');
-    try {
-      const apiKey = process.env.GOOGLE_API_KEY;
-      const cleanModelName = GEMINI_MODELS[0].replace(/^models\//, ''); // Try first model
-      const fullPrompt = `${systemPrompt}\n\nUser: ${prompt}`;
+    // If SDK failed, try REST API v1 for all models
+    console.log('SDK methods failed, trying REST API v1 for all models...');
+    for (const modelName of modelsToTry) {
+      const cleanModelName = modelName.replace(/^models\//, '');
+      console.log(`Attempting REST API v1 with model: ${cleanModelName}`);
       
-      const restResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/${cleanModelName}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: fullPrompt
-              }]
-            }],
-            generationConfig: {
-              maxOutputTokens: Math.min(maxTokens, 8192),
-              temperature: Math.max(0, Math.min(2, temperature))
-            }
-          })
-        }
-      );
-
-      if (restResponse.ok) {
-        const restData = await restResponse.json();
-        const text = restData.candidates?.[0]?.content?.parts?.[0]?.text;
-        
-        if (text) {
-          let cleanedResult = text;
-          cleanedResult = cleanedResult.replace(/```json\s*/, '').replace(/```\s*$/, '');
-          cleanedResult = cleanedResult.trim();
-          
-          return NextResponse.json({
-            result: cleanedResult,
-            model_used: cleanModelName,
-            method: 'REST API v1',
-            tokens_used: restData.usageMetadata?.totalTokenCount || 0,
-            input_tokens: restData.usageMetadata?.promptTokenCount || 0,
-            output_tokens: restData.usageMetadata?.candidatesTokenCount || 0
-          });
-        }
+      const restResult = await tryRestAPIv1(cleanModelName, fullPrompt, maxTokens, temperature);
+      
+      if (restResult.success && restResult.result) {
+        return NextResponse.json({
+          result: restResult.result.text,
+          model_used: cleanModelName,
+          method: 'REST API v1',
+          tokens_used: restResult.result.usageMetadata?.totalTokenCount || 0,
+          input_tokens: restResult.result.usageMetadata?.promptTokenCount || 0,
+          output_tokens: restResult.result.usageMetadata?.candidatesTokenCount || 0
+        });
       } else {
-        const errorData = await restResponse.json();
-        console.error('REST API v1 error:', errorData);
+        console.warn(`REST API v1 model ${cleanModelName} failed:`, restResult.error);
+        if (restResult.error) {
+          lastError = restResult.error;
+        }
       }
-    } catch (restError: any) {
-      console.error('REST API v1 fallback failed:', restError);
     }
 
-    // If all methods failed, try to list available models for debugging
-    const availableModels = await listAvailableModels();
+    // If all methods failed, return detailed error
+    // Use already fetched availableModels, or fetch again if empty
+    const finalAvailableModels = availableModels.length > 0 ? availableModels : await listAvailableModels();
     
     return NextResponse.json(
       {
         error: "All models failed",
-        last_error: lastError?.message || "Unknown error",
-        attempted_models: GEMINI_MODELS,
-        available_models_from_api: availableModels.length > 0 ? availableModels : "Could not fetch available models",
-        suggestion: availableModels.length > 0 
-          ? `Try using one of these available models: ${availableModels.slice(0, 5).join(', ')}`
-          : "Try adjusting your prompt or reducing maxTokens. Also verify your API key has access to Generative Language API."
+        last_error: lastError?.message || lastError?.error?.message || "Unknown error",
+        attempted_models: modelsToTry,
+        available_models_from_api: finalAvailableModels.length > 0 ? finalAvailableModels : "Could not fetch available models",
+        suggestion: finalAvailableModels.length > 0 
+          ? `Try using one of these available models: ${finalAvailableModels.slice(0, 5).join(', ')}`
+          : "Try adjusting your prompt or reducing maxTokens. Also verify your API key has access to Generative Language API and that the models are enabled in your Google Cloud project."
       },
       { status: 503 }
     );
