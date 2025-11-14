@@ -231,11 +231,20 @@ const RepoExplorerSection = () => {
         body: JSON.stringify({ prompt, maxTokens }),
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
+        // Extract error message from response
+        const errorMessage = data.error || data.details || `API request failed with status ${response.status}`;
+        const errorDetails = data.last_error ? ` Last error: ${data.last_error}` : '';
+        const suggestion = data.suggestion ? ` Suggestion: ${data.suggestion}` : '';
+        throw new Error(`${errorMessage}${errorDetails}${suggestion}`);
       }
 
-      const data = await response.json();
+      if (!data.result) {
+        throw new Error('No result returned from API. ' + (data.error || 'Unknown error'));
+      }
+
       return data.result;
     } catch (error) {
       console.error('Error calling OpenAI:', error);
@@ -299,7 +308,8 @@ const RepoExplorerSection = () => {
       setShowSummarySection(true);
     } catch (err) {
       console.error('Error generating test summaries:', err);
-      setError('Failed to generate test summaries');
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(`Failed to generate test summaries: ${errorMessage}`);
     } finally {
       setIsGeneratingSummaries(false);
     }
