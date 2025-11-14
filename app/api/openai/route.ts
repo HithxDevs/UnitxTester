@@ -10,7 +10,8 @@ const googleAI = process.env.GOOGLE_API_KEY
 const GEMINI_MODELS = [
   'gemini-1.5-flash',        // Best free tier limits
   'gemini-1.5-flash-latest', // Latest flash version
-  'gemini-pro'               // Fallback
+  'gemini-1.5-pro',          // Pro model fallback
+  'gemini-1.5-pro-latest'    // Latest pro version fallback
 ];
 
 interface GenerateRequest {
